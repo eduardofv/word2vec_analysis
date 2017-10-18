@@ -1,0 +1,4 @@
+SBW
+Versión limpia: full:clean.txt (sin acentos, solo minisculas)
+	46,925,295 lineas
+

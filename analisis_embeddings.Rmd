@@ -1,0 +1,152 @@
+---
+title: "Análisis de Embeddings"
+author: "Eduardo Flores"
+date: "9/14/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd('/Users/eduardofv/local/eduardofv/projects/github/w2va')
+source("word2vec_analysis_functions.R")
+
+#d <- cargar.embeddings.SBW("data/full/ds-spanish/SBW-vectors-300-min5.txt")
+#d <- cargar.embeddings.rds("data/spanish-")
+d <- cargar.embeddings.rds("data/spanish-full")
+#d <- cargar.embeddings("text8")
+#d <- cargar.embeddings.rds("text8")
+#  seria esto mejor con attach?
+emb <- d$emb
+vocab <- d$vocab
+rm(d)
+#guardar.rds("data/spanish-full",emb,vocab)
+```
+
+## PCA
+
+```{r}
+pca <- prcomp(emb)
+plot(pca,type="l",col="red")
+pca.sum <- summary(pca)
+plot(pca.sum$importance["Cumulative Proportion",],type="l")
+abline(v=50,col="red")
+abline(h=0.5,col="blue")
+
+pc <- as.data.frame(pca$x)
+pcn <- normalize(pc)
+
+```
+
+## Diferencias entre espacio original (emb), pca (pc) y pca normalizado (pcn)
+
+```{r}
+w1 <- "rey"
+w2 <- "reina"
+w3 <- "hombre"
+
+similares(w1,x=emb)
+similares(w1,x=pc)
+similares(w1,x=pcn)
+
+analogia(w1,w2,w3,x = emb)
+analogia(w1,w2,w3,x = pc)
+analogia(w1,w2,w3,x = pcn)
+```
+
+## PC1
+
+```{r}
+hist(pcn$PC1)
+vpc1 <- vocab[ order(pcn$PC1,decreasing = T), ]
+head(vpc1,n=10)
+tail(vpc1,n=10)
+word.plot.dimension(pcn,target.dim = 1,sec.dim = 2,v = vocab,max.plot = 25)
+
+last <- pcn[,ncol(pcn)]
+hist(last)
+vpc1 <- vocab[ order(last,decreasing = T), ]
+head(vpc1,n=10)
+tail(vpc1,n=10)
+word.plot.dimension(pcn,target.dim = ncol(pcn),sec.dim = 1,v = vocab,max.plot = 25)
+```
+
+## Analisis de un grupo
+
+Interesante: se encuentran numeros en los valores bajos de PC2 (jobwords)
+```{r}
+word.plot.dimension(pcn,target.dim = "PC2",sec.dim = "PC1",max.plot = 10)
+w <- "rey" #"$" 
+similares(w, x = pcn)
+d <- similares(w,n = 100, x = pcn,vectors = T)
+dv <- vocab[rownames(d),]
+word.plot(d,dims = c(1,2),v=dv)
+
+#pca en ese conjunto
+d.pca <- prcomp(d)
+summary(d.pca)
+plot(d.pca$sdev,type="o",pch="+")
+text(x=seq(1,100),y=d.pca$sdev,labels = paste0("PC",seq(1,100)),cex=0.5,pos=4)
+
+```
+
+Con dos primeras dimensiones palabras y numeros son separables linealmente 
+```{r}
+word.plot(d.pca$x,v=dv)
+```
+
+Con PC1 y PC3 (casi solo PC3) las cantidades sin "$" son separables
+```{r}
+word.plot(d.pca$x,v=dv,dims = c("PC1","PC3"))
+```
+
+Con PC4 cantidades "pequeñas" son sepabales
+```{r}
+word.plot(d.pca$x,v=dv,dims = c("PC1","PC4"))
+```
+
+Con PC5 no hay nada evidente, con PC6 hay algunos errores de limpieza de datos
+```{r}
+word.plot(d.pca$x,v=dv,dims = c("PC1","PC6"))
+```
+
+Un k-means muy interesante:
+```{r}
+pca.cluster.similar(w,x = pcn,v = vocab,n=200,show.center.analysis = T)
+
+dclust<-pca.cluster.similar(w,x = pcn,v = vocab,n = 500,centers = 11)
+cluster.wordcloud(dclust,scale = c(3,0.5),by.sim=T)
+```
+
+Comparar con el kmeans usando el espacio original:
+```{r}
+d <- similares(w,n = 100, x = emb,vectors = T)
+dv <- vocab[rownames(d),]
+k <- kmeans(d[,1:8],6)
+word.plot(d[,1:2],v=dv,col=k$cluster)
+
+```
+
+
+
+## Algunas estadisticas interesantes
+```{r}
+#head(emb,n = 10)
+#similares("france",x=emb)
+
+#Algunas estadisticas interesantes
+#summary(emb$V200)
+#qqplot(emb$V200,rnorm(1000,mean=mean(emb$V200),sd=sd(emb$V200)),pch=".")
+#abline(a=0,b=1,col="red")
+#norms<-apply(emb,1,function(x){sqrt(sum(x^2))})
+#hist(norms)
+
+#similitud promedio de los 10 primeros resultados para una muestra aleatoria de 100 palabras
+#s<-sapply(vocab$V2[sample(nrow(vocab),100)],FUN=function(x){mean(similares(x)$cos.sim)})
+#hist(s)
+
+
+
+```
+
+

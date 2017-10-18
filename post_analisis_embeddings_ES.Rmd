@@ -1,0 +1,159 @@
+# Analizando Vectores de Word2Vec
+
+[eduardofv](http://eduardofv.com) / [github](https://github.com/eduardofv)
+
+## Objetivo
+
+[Word2Vec](https://en.wikipedia.org/wiki/Word2vec) es un algoritmo de Procesamiento de Lenguaje Natural que genera representaciones de palabras en un espacio vectorial a partir de un corpus de texto. Para ello usa el "contexto" de cada palabra definido como el conjunto de *n* palabras alrededor de la palabra de interés. Estas representaciones se generan por medio de un modelo predictivo en el cual una red neuronal trata de predecir qué palabras aparecerán junto a una palabra determinada (modelo skipgram) o qué palabra es la aparecerá dadas otras *n* (modelo CBOW o Continous Bag Of World). Ver la [publicación original](https://arxiv.org/abs/1301.3781). Se ha encontrado que estos vectores guardan ciertas relaciones semánticas y sintácticas que harían posible su uso en varias aplicaciones.
+
+Es por esto que se vuelve necesario desarrollar una metodología para el análisis de estos vectores y que permitan crear aplicaciones de ellos. A continuación presento algunas ideas de qué se puede hacer con ellos.
+
+## El corpus y generación de embeddings.
+
+La base para la generación de las representaciones vectoriales de palabras es un corpus de texto. Para el caso de español he utilizado el magnífico corpus recabado por Cristian Cardellino "Spanish Billion Words Corpus and Embeddings" (ver referencias) que consta de más de 1,000 millones de palabras en español. Cristian ha puesto disponible no solo el corpus ya limpio sino también los embeddings ya generados. Desafortunadamente no se encuentra el vocabulario y las frecuencias de palabras. 
+
+Para tener el vocabulario incluyendo frecuencias y un espacio de menos dimensiones corrí [Word2Vec en Tensorflow](https://www.tensorflow.org/tutorials/word2vec) en su versión optimizada con algunas modificaciones ([github](https://github.com/tensorflow/models/tree/master/tutorials/embedding)). Para esto se limpiaron los datos del corpus SBWE original eliminando acentos, caracteres especiales y convirtiendo a minúsculas. Se entrenó durante 15 épocas para 200 dimensiones. Se generaron embeddings para 808,854 términos con frecuencia de al menos 5 y el término UNK.
+
+## Carga de datos
+
+```{r cargar_datos}
+#Funciones de análisis
+#https://haozhu233.github.io/kableExtra/awesome_table_in_html.html#installation
+library(kableExtra)
+source("word2vec_analysis_functions.R")
+set.seed(1234)
+
+#Corpus 1: SBWE (español) corpus a partir de embeddings generados por w2v en TF
+#  Este corpus contiene 808,854 términos en 200 dimensiones, entrenado en 15 épocas
+#d <- cargar.embeddings("data/full/ds-spanish/spanish_billion_words/")
+#  Usar datos previamente guardados como binarios, es mas rápido
+d <- cargar.embeddings.rds("data/SBW-w2v-200d-")
+
+#Corpus 2: SBWE (español) reducido a los primeros 100,000 elementos, para pruebas (mas rápido)
+#d <- cargar.embeddings.rds("data/SBW-min-")
+
+#Corpus 3: text8 (english) corpus a partir de embeddings generados por w2v en TF
+#d <- cargar.embeddings.rds("data/text8-")
+
+#d <- cargar.embeddings.rds("data/jobs_big1-")
+
+emb <- d$emb
+vocab <- d$vocab
+rm(d)
+```
+
+## Análisis descriptivo del espacio de componentes principales
+
+Se efectúa un análisis de componentes principales (PCA). Esto nos permite transformar los vectores del espacio original a un espacio donde cada una de las dimensiones tiene una varianza progresivamente menor. Esto ayuda a identificar mejor dónde se pueden localizar algunos grupos de términos relacionados entre sí.
+
+```{r PCA_summary}
+pca <- prcomp(emb)
+plot(pca,type="l",col="red",main="Variance of the first principal components")
+```
+
+En la siguiente gráfica podemos observar la varianza acumulada por dimensión del espacio transformado. La recta azul muestra con cuántas dimensiones se alcanza el 50% de la varianza. La línea roja muestra cuánta varianza es explicada con las primeras 50 dimensiones.
+
+```{r PCA_Cumulative_Proportion}
+pca.sum <- summary(pca)
+plot(pca.sum$importance["Cumulative Proportion",],type="l",
+     main="Accumulated Variance along principal components",
+     xlab="Dimensions",ylab="Cumulative Proportion")
+abline(v=50,col="red")
+abline(h=0.5,col="blue")
+```
+
+## Términos cercanos en el espacio original y en el espacio de componentes principales
+
+Observamos términos cercanos para algunos casos de ejemplo. La cercanía se calcula aplicando [Similitud Coseno](https://en.wikipedia.org/wiki/Cosine_similarity) del vector de un término con todos los demás. Observamos que hay diferencias importantes entre las similitudes encontradas en el espacio original y el espacio transformado por PCA. Si este último se normaliza no hay diferencia.
+
+```{r Similarities, results='asis'}
+# Espacio transformado en componentes principales
+pc <- as.data.frame(pca$x)
+#  Espacio transformado en componentes principales y normalizado
+pcn <- normalize(pc)
+dslist <- list(emb,pc,pcn)
+dsnames <- c("original","principal components", "PC norm" )
+
+wlist <- list("rey","yoga","mexico")
+for(w in wlist){
+  i<-1
+  cat(paste0("### Terminos similares a '",w,"'\n\n"))
+  for(ds in dslist){
+    cat(paste0("#### Espacio ",dsnames[i],"\n\n"))
+    print(knitr::kable(similares(w,x=ds)[1:5,c("word","freq","cos.sim")],format = "html") 
+          %>% kable_styling(bootstrap_options = "striped", full_width = F))
+    i<-i+1
+  }
+}
+```
+
+## Analogías en el espacio original y en el de componentes principales
+
+Observamos que se comportan las analogías en cada uno de los espacios. En este casi sí hay diferencias en los resultados. En general he observado mejores resultados en el espacio de componentes principales normalizado. Para términos comunes tambien se observa que hay mejores resultados si además se eliminan términos menos frecuentes del dataset.
+
+```{r Analogies, results="asis"}
+
+anlist <- list(c("francia","paris","espana"), 
+               c("rey","reina","hombre"), 
+               c("apple","ios","microsoft"))
+for(a in anlist){
+  cat(paste0("### Analogias para ",paste(a,collapse = "/"),"\n\n"))
+  i<-1
+  for(d in dslist){
+    cat(paste0("####  Espacio ",dsnames[i],"\n\n"))
+    print(knitr::kable(analogia(a[1],a[2],a[3],x=d)[1:3,c("word","freq","cos.sim")],
+                       format = "html") %>% 
+            kable_styling(bootstrap_options = "striped", full_width = F))
+    i<-i+1
+  }
+}
+
+```
+
+## Valores extremos en algunas dimensiones
+
+Se observan grupos identificables en los valores extremos de cada una de las dimensiones. Especialmente en dimensiones con menor varianza, los extremos son grupos aparentemente mas definidos. En otras palabras, parece que en las dimensiones que explican menos varianza los conjuntos de términos en los extremos son mas definidos.
+
+```{r Extreme_values}
+word.plot.dimension(pcn,target.dim = "PC1",sec.dim = "PC2",max.plot = 20)
+word.plot.dimension(pcn,target.dim = "PC200",sec.dim = "PC1",max.plot = 20)
+word.plot.dimension(pcn,target.dim = "PC199",sec.dim = "PC1",max.plot = 20)
+```
+
+## Análisis de grupos a partir de un término
+
+Encontramos una metodología simple para el análisis de los términos relacionados con un término base:
+
+1. Se obtienen un número determinado de términos mas cercanos (similares) a partir del espacio de componentes principales normalizado.
+2. Se hace un [K-Means clustering](https://en.wikipedia.org/wiki/K-means_clustering) de los términos. Opcionalmente se puede realizar previamente un análsis para determinar el número de clusters que se deben generar.
+3. Se grafican en las dos primeras dimensiones utilizadas.
+4. Se genera un wordcloud por cada cluster de palabras generado.
+
+Podemos observar que en general los grupos identifican distintos grupos de palabras relacionados entre sí de alguna forma. Hemos visto grupos de adjetivos, razas de perros, características semánticas, etc. razonablemente bien agrupadas mediante este método.
+
+```{r Term_groups, results='asis'}
+termlist <- list("perro","web","algoritmo")
+termclist <- c(8,7,8)
+
+for(w in termlist){
+  cat(paste0("### Analisis para el termino: ",w,"\n\n"))
+  dclust<-pca.cluster.similar(w,x = pcn,v = vocab,n=300,show.center.analysis = T)
+  dclust<-pca.cluster.similar(w,x = pcn,v = vocab,n=300,centers=termclist[w==termlist])
+  cluster.wordcloud(dclust,scale=c(2.75,0.5))
+  cat("\n\n")
+}
+
+```
+
+## Links a los datos
+
+### Datos
+
+Cristian Cardellino: Spanish Billion Words Corpus and Embeddings (March 2016), http://crscardellino.me/SBWCE/
+
+Embeddings y vocabulario para Spanish Billion Words a partir de mi corrida de Word2Vec en Tensorflow: 
+
+* [texto](https://drive.google.com/file/d/0B8sSS4reXG91Z0lBVXM4c2RYQ1k/view?usp=sharing)
+* [RDS](https://drive.google.com/file/d/0B8sSS4reXG91aE9saVpNLWxBb00/view?usp=sharing) 
+* [RDS de primeros 10,000 términos](https://drive.google.com/file/d/0B8sSS4reXG91ODloRmdxODBLRWM/view?usp=sharing)
+
